@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body>
+    <script>
+        // version 1  先简单的实现
+        const STATUS = {
+            FULFILLED: 'fulfilled',
+            REJECTED: 'rejected',
+            PENDING: 'pending',
+        }
+        class MyPromise1{
+            // executor 执行器
+            constructor( executor ){
+                this.status = STATUS.PENDING;
+                this.value = null;
+                this.error = null;
+                this.resolveCallback = [];
+                this.rejectCallback = [];
+                
+                // 状态变化只会执行一次
+                const resolve = ( val ) => {
+                    if(this.status === STATUS.PENDING){
+                        this.value = val;
+                        this.status = STATUS.FULFILLED;
+                        this.resolveCallback.forEach(item=> item(val))
+                    }
+                }
+                const reject = err => {
+                    if(this.status === STATUS.REJECTED){
+                        this.status = STATUS.REJECTED;
+                        this.error = err;
+                        this.rejectCallback.forEach(item=> item(err))
+                    }
+                }
+
+                try{
+                   executor(resolve, reject)
+                }catch(err){
+                   reject(err)
+                }
+            }
+            
+            // then 就是最关键的
+            then = ( resolveFn, rejectFn ) => {
+                resolveFn = typeof resolveFn === 'function' ? resolveFn : v => v;
+                rejectFn = typeof rejectFn === 'function' ? rejectFn : err => {throw err};
+                if(this.status === STATUS.PENDING){
+                    this.resolveCallback.push(resolveFn);
+                    this.rejectCallback.push(rejectFn);
+                }else if( this.status === STATUS.REJECTED ) {
+                    setTimeout(()=>{
+                        rejectFn(this.error)
+                    })
+                }else{
+                    setTimeout(()=>{
+                        resolveFn(this.value)
+                    })
+                }
+
+            }
+        }
+
+        const showFirst = () => {
+            return new MyPromise1(resolve=>{
+                resolve(456)
+            }).then(res=>{
+                console.log(res)
+            })
+        }
+        // console.log('before promise')
+        // showFirst()
+        // console.log('after promise')
+    </script>
+
+
+<script>
+    // version 2  回返回promise进行链式调用
+    // 其实可以写在promise里面，里面可以隔离
+    function resolvePromise () {
+
+    }
+    class MyPromise2{
+        // executor 执行器
+        constructor( executor ){
+            this.status = STATUS.PENDING;
+            this.value = null;
+            this.error = null;
+            this.resolveCallback = [];
+            this.rejectCallback = [];
+            
+            // 状态变化只会执行一次
+            const _this = this;
+            function resolve ( val ) {
+                if(val instanceof MyPromise2){
+                    // _this.resolvePromise(_this, val , resolve, reject)
+                    // _this.value = val.value;
+                    // _this.error = val.error;
+                    // _this.status = val.status;
+                    _this.resolvePromise(_this, val , resolve, reject)
+                    return;
+                }
+                if(_this.status === STATUS.PENDING){
+                    _this.value = val;
+                    _this.status = STATUS.FULFILLED;
+                    _this.resolveCallback.forEach(item=> item(val))
+                }
+            }
+            function reject (err ) {
+                if(_this.status === STATUS.PENDING){
+                    _this.status = STATUS.REJECTED;
+                    _this.error = err;
+                    _this.rejectCallback.forEach(item=> item(err))
+                }
+            }
+
+            try{
+               executor(resolve, reject)
+            }catch(err){
+               reject(err)
+            }
+        }
+        
+        // then 就是最关键的
+        then = ( resolveFn, rejectFn ) => {
+            resolveFn = typeof resolveFn === 'function' ? resolveFn : v => v;
+            // 由于这里报错，所以会直接走reject 当走了 resolvePromise 才能将情况变化，才能走then了。
+            // 所以等reject的话，往下走的话， 不断的then的话，始终是rejected，只有当走了then的第二个参数或者catch，才能将下一个状态变为resolve
+            rejectFn = typeof rejectFn === 'function' ? rejectFn : err => {throw err};
+
+            const promise2 =  new MyPromise2(( resolve, reject)=>{
+                if(this.status === STATUS.PENDING){
+                    this.resolveCallback.push(()=>{
+                            setTimeout(()=>{
+                                try{
+                                    const x = resolveFn(this.value);
+                                    this.resolvePromise(promise2, x, resolve, reject)
+                                }catch(err){
+                                    reject(err)
+                                }
+                            })
+                       
+                    });
+
+                    this.rejectCallback.push(()=>{
+                        setTimeout(()=>{
+                            try{
+                                const x = rejectFn(this.error);
+                                this.resolvePromise(promise2, x, resolve, reject)
+                            }catch(err){
+                                reject(err)
+                            }
+                        })
+                    });
+                }else if( this.status === STATUS.REJECTED ) {
+                    setTimeout(()=>{
+                            try{
+                                const x = rejectFn(this.error);
+                                this.resolvePromise(promise2, x, resolve, reject)
+                            }catch(err){
+                                reject(err)
+                            }
+                        })
+                }else{
+                    setTimeout(()=>{
+                            try{
+                                const x = resolveFn(this.value);
+                                this.resolvePromise(promise2, x, resolve, reject)
+                            }catch(err){
+                                reject(err)
+                            }
+                        })
+                }
+            })
+            return promise2
+        }
+
+        catch = ( fn ) => {
+           return this.then( null, fn)
+        }
+         
+        finally = ( cb ) => {
+            return new MyPromise2((resolve,reject)=>{
+                this.then(res=>{
+                  cb && cb ()
+                  resolve(res)
+                },err=>{
+                    cb && cb ()
+                    reject(err)
+                })
+            })
+            
+          
+        }
+        static resolve = ( val ) => {
+           return new MyPromise2((resolve)=>{
+              resolve(val)
+           })
+        }
+
+        static reject = ( val ) => {
+           return new MyPromise2((resolve, reject)=>{
+              reject(val)
+           })
+        }
+
+       static race = (arrs) => {
+            const len = arrs.length;
+            let hasReturn = false
+            // 简单当成都是
+            return new MyPromise2((resolve,reject)=>{
+               arrs.forEach((item, index)=>{
+                   if(item instanceof MyPromise2){
+                       item.then(res=>{
+                         if(hasReturn){
+                             return 
+                         }
+                         hasReturn = true
+                         resolve(res)
+                       },err=>{
+                        if(hasReturn){
+                             return 
+                         }
+                         hasReturn = true
+                         reject(err)
+                       })
+                   }
+                   
+               })
+            })
+        }
+
+
+       static all = (arrs) => {
+            const len = arrs.length;
+            const returnArr = []
+            let currentLen = 0
+            // 简单当成都是
+            return new MyPromise2((resolve,reject)=>{
+               arrs.forEach((item, index)=>{
+                   if(item instanceof MyPromise2){
+                       item.then(res=>{
+                            returnArr[index] = res
+                            currentLen++
+                            if(currentLen === len) {
+                                resolve(returnArr)
+                            }
+                       },err=>{
+                         reject(err)
+                       })
+                   }
+                   
+               })
+            })
+        }
+
+        resolvePromise = ( promise, x, resolve, reject) => {
+           if(promise === x ){
+              reject( new TypeError('call back 循环了'))
+           }
+            // 除了promise的then，对象里面有then的方法也是可以的
+           if( x !== null && ( typeof x === 'object' || typeof x === 'function')){
+              let used = false
+              try{
+                 let then = x.then
+                 if(typeof then === 'function'){
+                    then.call(x, res=>{
+                        if(used) return;
+                        used = true
+                        this.resolvePromise(promise, res, resolve, reject )
+                    }, err => {
+                        if(used) return;
+                        used = true
+                        reject(err)
+                    })
+                 }else{
+                    if(used) return;
+                    used = true
+                    resolve( x )
+                 }
+              }catch(err){
+                if(used) return;
+                 used = true
+                reject(err)
+              }
+           }else{ 
+               try{
+                   resolve( x )
+               }catch(err){
+                   reject( err )
+               }
+           }
+        }
+    }
+
+    const showSecond = () => {
+        return new MyPromise2((resolve, reject)=>{
+            resolve(MyPromise2.reject(66))
+        }).then(res=>{
+            console.log(res,'kk')
+            // return new Promise((resolve, reject)=>reject(9))
+        }).then(res=>{
+            console.log(res,'cc')
+        }).catch(err=>{
+            console.log('begin')
+            console.log(err,'er')
+            return 678
+        }).then(res=>{
+            console.log(res,'return')
+        })
+    }
+    const showSecondInit = () => {
+        return new Promise((resolve, reject)=>{
+            // resolve(new Promise((resolve,reject)=>reject(123)))
+            resolve(Promise.reject(66))
+        }).then(res=>{
+            console.log(res)
+            return 678
+        }).then(res=>{
+            console.log(res)
+        }).catch(err=>{
+            console.log(err,'er')
+        }).then(res=>{
+            console.log(res)
+        })
+    }
+    // console.log('before promise')
+    // showSecondInit()
+    // showSecond()
+    // console.log('after promise')
+    // throw new Error(4)
+
+    function getData (val, type, ms = 2000) {
+        return new MyPromise2((resolve,reject)=>{
+            setTimeout(()=>{
+                if(type === STATUS.REJECTED){
+                    reject(val)
+                }else{
+                    resolve(val)
+                }
+            }, ms)
+        })
+    }
+   window.MyPromise = MyPromise2
+    function initGetData (val, type, ms = 2000) {
+        return new Promise((resolve,reject)=>{
+            setTimeout(()=>{
+                if(type === STATUS.REJECTED){
+                    reject(val)
+                }else{
+                    console.log('resolve')
+                    resolve(val)
+                }
+            }, ms)
+        })
+    }
+
+    // MyPromise2.all([getData(1,null, 2000),getData(2,null, 8000), getData(3,STATUS.REJECTED, 4000)]).then(res=>{
+    //     console.log(res)
+    // }).finally(()=>{alert(9);return 123}).then(res=>console.log(res,'11')).catch(err=>console.log(err,'22'))
+    // console.log(MyPromise2.resolve(9))
+    // console.log(MyPromise2.reject(9))
+
+    // MyPromise2.reject(9).finally(()=>console.log('finaly')).then(res=>console.log(res,'value')).catch(err=>console.log(err,'error'))
+    // Promise.reject(9).finally(()=>console.log('finaly')).then(res=>console.log(res,'value')).catch(err=>console.log(err,'error'))
+
+    // MyPromise2.race([getData('aa'), getData('cc',STATUS.REJECTED, 1000)]).then(res=>console.log(res,'value')).catch(err=>console.log(err,'error'))
+</script>
+
+
+<div> 123 </div>
+</body>
+</html>

@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body>
+    <script>
+        const STATUS = {
+            FULFILLED: 'fulfilled',
+            REJECTED: 'rejected',
+            PENDING: 'pending',
+        }
+        class MyPromise3{
+            constructor(executor){
+                this.status = STATUS.PENDING;
+                this.value = null;
+                this.error = null;
+                this.resolveCallBack = [];
+                this.rejectCallBack = [];
+                
+                // let _this = this;
+                const reject =  ( err ) =>  {
+                    if(this.status === STATUS.PENDING ){
+                        this.error = err;
+                        this.status = STATUS.REJECTED;
+                        this.rejectCallBack.forEach(item=> item(err))
+                    }
+                }
+    
+                const resolve  = ( val )  => {
+                    // resolve比较特别，会把里面的处理一下, 比如里面是 reject的话，回把状态变rejected
+                    if( val instanceof MyPromise3){
+                        this.resolvePromise( this , val ,resolve, reject )
+                        return;
+                    }
+                    // 只改变一次
+                    if( this.status === STATUS.PENDING ){
+                        this.status = STATUS.FULFILLED
+                        this.value = val;
+                        this.resolveCallBack.forEach( item => item(val))
+                    }
+                }
+    
+                try {
+                    executor(resolve, reject)
+                }catch( err ){
+                    reject( err )
+                }
+    
+            }
+    
+            // then = ( resolveFn , rejectFn ) => {
+            //     resolveFn = typeof resolveFn === 'function' ? resolveFn : val => val;
+            //     // 下面的比较关键， 这个当我们没有写then的第二个函数，或者没有catch，就会是状态一直是rejected的,当然这是后面的
+            //     rejectFn = typeof rejectFn === 'function' ? rejectFn : err => { throw err};
+            //     // 做点延时
+            //     if(this.status === STATUS.PENDING ){
+            //         this.resolveCallBack.push(resolveFn);
+            //         this.rejectCallBack.push(rejectFn);
+            //     }else if ( this.status === STATUS.FULFILLED ){
+            //         setTimeout(()=>{
+            //             resolveFn(this.value)
+            //         })
+            //     }else{
+            //         setTimeout(()=>{
+            //             rejectFn(this.error)
+            //          })
+            //     }
+            // }
+    
+            
+            then = ( resolveFn , rejectFn ) => {
+                resolveFn = typeof resolveFn === 'function' ? resolveFn : val => val;
+                // 下面的比较关键， 这个当我们没有写then的第二个函数，或者没有catch，就会是状态一直是rejected的,当然这是后面的
+                rejectFn = typeof rejectFn === 'function' ? rejectFn : err => { throw err};
+                // 链式调用
+                const promise3 = new MyPromise3((resolve,reject)=>{
+                    // 做点延时
+                    if(this.status === STATUS.PENDING ){
+                        this.resolveCallBack.push(()=>{
+                            setTimeout(()=>{
+                                try{
+                                    const x = resolveFn(this.value);
+                                    this.resolvePromise(promise3, x, resolve, reject)
+                                }catch(err){
+                                    reject(err)
+                                }
+                            })
+                        });
+                        this.rejectCallBack.push(()=>{
+                            setTimeout(()=>{
+                                try{
+                                    const x = rejectFn(this.error);
+                                    this.resolvePromise(promise3, x, resolve, reject)
+                                }catch(err){
+                                    reject(err)
+                                }
+                            })
+                        });
+                    }else if ( this.status === STATUS.FULFILLED ){
+                        setTimeout(()=>{
+                            try{
+                                const x = resolveFn(this.value);
+                                this.resolvePromise(promise3, x, resolve, reject)
+                            }catch(err){
+                                reject(err)
+                            }
+                        })
+                    }else{
+                        setTimeout(()=>{
+                            try{
+                                const x = rejectFn(this.error);
+                                this.resolvePromise(promise3, x, resolve, reject)
+                            }catch(err){
+                                reject(err)
+                            }
+                        })
+                    }
+                })
+               return promise3
+            }
+    
+            catch = ( rejectFn ) => {
+                return this.then(null, rejectFn );
+            }
+    
+
+            finally = ( cb ) => {
+               return new Promise((resolve, reject) => {
+                   this.then(res=>{
+                     resolve(res)
+                     cb && cb ()
+                   }, err=>{
+                     cb && cb ()
+                     reject(err)
+                   })
+               })
+            }
+
+            static reject = ( err ) => {
+               return new MyPromise3((resolve,reject) => {
+                   reject(err)
+               })
+            }
+    
+            static resolve = ( err ) => {
+               return new MyPromise3((resolve,reject) => {
+                   resolve(err)
+               })
+            }
+
+            static all = (args) => {
+               const len = args.length;
+               const returnArr = []
+               return new MyPromise3((resolve,reject)=>{
+                  args.forEach((item,index)=>{
+                     item.then(res=>{
+                        returnArr[index] = res;
+                        if(returnArr.length === len){
+                            resolve(returnArr)
+                        }
+                     },err=>{
+                        reject(err)
+                     })
+                  })
+               })
+            }
+
+            static race = (args) => {
+                return new MyPromise3((resolve,reject)=>{
+                  args.forEach((item,index)=>{
+                     item.then(res=>{
+                        resolve(res)
+                     },err=>{
+                        reject(err)
+                     })
+                  })
+               })
+            }
+    
+            resolvePromise = ( promise, x, resolve, reject ) => {
+                // 内部是不能循环调用的
+                if( promise === x ){
+                    reject(new TypeError('call 循环'))
+                    return;
+                }
+    
+                // 遇到同样是有then的 this的指向是x
+                // 当走到里面正常会把状态变好
+                if( x!== null  && ( typeof x === 'object' || typeof x === 'function')){
+                    let isJust = false;
+                    try{
+                        // 怕define吧then设定问题
+                        const then = x.then
+                        if( typeof then === 'function'){
+                            // 指向内部的 怕res也是有循环的
+                            then.call( x , res => {
+                                 // 触发一次
+                                if(isJust) return ;
+                                isJust = true
+                                this.resolvePromise( promise, res, resolve, reject)
+                            }, err => {
+                                 // 触发一次
+                                if(isJust) return ;
+                                isJust = true
+                                reject(err)
+                            })
+                        }else{
+                            // 触发一次
+                            if(isJust) return ;
+                            isJust = true
+                            resolve( x )
+                        }
+                    }catch(err){
+                         // 触发一次
+                        if(isJust) return ;
+                        isJust = true
+                        reject(err)
+                    }
+                }else{
+                    resolve(x)
+                }
+                
+            }
+    
+        }
+    
+        function getPromise (){
+            return new MyPromise3((resolve,reject) => {
+                resolve(MyPromise3.resolve(55))
+            }).then(res=> console.log(res, '1')).then(res=> console.log(res, '2')).catch(err=>console.log(err,'error')).then(res=>console.log(res))
+        }
+       
+        // getPromise()
+
+        function getData( val , type, ms = 2000 ){
+            return new MyPromise3((resolve,reject) => {
+                setTimeout(()=>{
+                   if(type === STATUS.REJECTED){
+                      reject(val)
+                   }else{
+                       resolve(val)
+                   }
+                }, ms)
+            })
+        }
+
+        // MyPromise3.race([getData(11), getData(22, STATUS.REJECTED, 3000)]).then(res=>{
+        //     console.log( res )
+        // },err => console.log( err, 'error' ))
+        
+        MyPromise3.reject(66).finally(res=>{
+            console.log(res, 'kk')
+        }).then(res=>console.log(res, 'kk myPromise')).catch(err=>console.log(err, 'kk myPromise error'))
+
+        Promise.reject(66).finally(res=>{
+            console.log(res, 'kk promise')
+        }).then(res=>console.log(res, 'kk after promise')).catch(err=>console.log(err, 'kk promise error'))
+
+
+        // es5的继承和es6的继承的区别
+        // 1. 生成： es5是先生成实例this，在往this上加父的属性和方法 ；而es6是通过父的属性和方法生产this，再把this指向实例
+        // 2:  es由于上面，所以继承不了原生的比如Array等的内部属性方法， 而es是可以完全继承的
+    </script>
+</body>
+</html>
