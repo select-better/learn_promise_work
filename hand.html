@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body style='height: 400px'>
+    <script>
+        // ===========  手写call ================
+        // 主要思路： a.fn = ()=>{} 改变this ； 然后删除 delete a.fn
+        // 模范比较以前的数据
+        Function.prototype.myCall = function (context) {
+            context = context || window;
+            var args = []
+            context.fn = this;
+            for(let i = 1; i < arguments.length; i ++){
+                args.push('arguments[' + i + ']')
+            }
+            const result = eval('context.fn('+ args + ')')
+
+            delete context.fn
+            return result
+        }
+
+        function getData(a,b){
+            console.log(this.value, a,b)
+        }
+
+        const obj = {
+            value: 11
+        }
+
+        getData.myCall(obj,4,5)
+       
+        
+        // ===========  手写apply ================
+        // 和call类似
+        Function.prototype.myApply = function (context) {
+            context = context || window;
+            let args = [];
+            const params = arguments[1]
+            if(arguments[1] && params.length){
+                for(let i = 0;i< params.length; i++){
+                    args.push(params[i])
+                }
+            }
+            context.fn = this
+            // 加一些判断
+            if(!args || typeof args === 'object'){
+                const result = eval('context.fn('+ args + ')')
+                delete context.fn
+                return result
+            }else{
+                throw TypeError('not-a-object')
+            }
+        }
+
+        getData.myApply(obj,{0:1,length:1})
+
+
+        // ===========  手写bind ================
+        // bind 还能new 所以我们小心 new 指向new
+        Function.prototype.myBind = function (context) {
+            context = context || window;
+            
+            const func = this;
+            if(typeof func!=='function'){
+                throw TypeError('not-a-function')
+            }
+            // 获取外层的args
+            const args = [].slice.myCall(arguments, 1)
+
+            // 简单做一个继承
+            function fn(){};
+
+            function fd () {
+               // 主要有个this的指向
+               return func.apply( this instanceof fn ? this : context,  args.concat([...arguments]))
+            }
+
+            fd.prototype = new fn();
+           
+            return fd;
+        }
+        
+        const fn1 = getData.myBind(obj,1);
+        new fn1(6)
+
+       // ===========  debounce ================
+       // 防抖 能立即执行 能取消后重新开始
+        // v1
+        //    function debounce(fn, ms, immediate){
+        //        let timer= null;
+        //        return function (...args) {
+        //            let context = this;
+        //            if(timer){
+        //                clearTimeout(timer)
+        //            }
+        //            timer = setTimeout(()=>{
+        //              fn.apply(context, args)
+        //            }, ms)
+        //        }
+        //    }
+
+        // v2
+        // function debounce(fn, ms, immediate){
+        //     let timer= null, result = undefined;
+        //     return function (...args) {
+        //         let context = this;
+        //         let hasOpen = false
+        //         if(timer){
+        //             clearTimeout(timer)
+        //         }
+        //         if(immediate && !timer){
+        //            if(!timer) hasOpen = true;
+        //            timer = setTimeout(()=>{
+        //              timer = null
+        //            },ms)
+        //            if(hasOpen){
+        //              result = fn.apply(context, args)
+        //            }
+        //         }else{
+        //             timer = setTimeout(()=>{
+        //              fn.apply(context, args)
+        //            }, ms)
+        //         }
+        //         return result
+        //     }
+        // }
+
+        function debounce(fn, ms, immediate){
+            let timer= null, result = undefined;
+            function getInfo(...args) {
+                let context = this;
+                let hasOpen = false
+                if(timer){
+                    clearTimeout(timer)
+                }
+                // 当开始的时候
+                if(immediate&&!timer){
+                   timer = setTimeout(()=>{
+                     timer = null
+                   },ms)
+                   result = fn.apply(context, args)
+                }else{
+                    timer = setTimeout(()=>{
+                     fn.apply(context, args)
+                   }, ms)
+                }
+                return result
+            }
+             // 取消后，开始最初的状态
+            getInfo.cancel = function(){
+                clearTimeout(timer);
+                timer= null;
+            }
+            return getInfo
+        }
+
+        const fn = debounce( ()=>console.log(1), 2000, true)
+        document.documentElement.addEventListener('mousemove', fn)
+        document.documentElement.addEventListener('click', fn.cancel)
+
+
+
+        // =========== new ================
+        function newObject(instance, ...args){
+           
+            const context = Object.create(Object.prototype);
+
+            const result = instance.apply(context, args)
+
+            Object.setPrototypeOf(context, instance)
+
+            // 如果有返回对象，就是对象
+            return typeof result === 'object' && result ? result : context
+        }
+
+        function GetData (name){
+            this.name = name
+            return { a: 1}
+        }
+
+       console.log( newObject(GetData, 'zs')) 
+    </script>
+</body>
+</html>
